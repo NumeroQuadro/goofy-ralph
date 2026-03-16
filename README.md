@@ -88,6 +88,7 @@ Backend notes:
 
 - `codex` keeps the existing `ralph` mode behavior (`default`, `read-only`, `full-auto`, and so on)
 - `opencode` inherits the current opencode model/agent setup unless you override `--model` or `--agent`
+- if `codex` is not installed but `opencode` is, `ralph` auto-switches to `opencode`
 
 The helper runner lives at `scripts/repeat_codex_prompt.sh` and now supports both backends.
 

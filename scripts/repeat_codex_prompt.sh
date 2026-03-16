@@ -229,6 +229,11 @@ case "$backend" in
     ;;
 esac
 
+if ((dry_run == 0)) && ! command -v "$backend" >/dev/null 2>&1; then
+  log_stderr "error backend command not found on PATH: $backend"
+  exit 127
+fi
+
 if [[ "$backend" == "codex" && -n "$agent" ]]; then
   log_stderr "error --agent is only supported with --backend opencode"
   exit 2

@@ -120,6 +120,11 @@ array_get() {
 script_path="$(resolve_script_path "${BASH_SOURCE[0]}")"
 repo_root="$(cd "$(dirname "$script_path")/.." && pwd)"
 repeat_script="${repo_root}/scripts/repeat_codex_prompt.sh"
+arrow_key_read_timeout="0.1"
+
+if ((BASH_VERSINFO[0] < 4)); then
+  arrow_key_read_timeout="1"
+fi
 
 if [[ ! -x "$repeat_script" ]]; then
   echo "repeat runner not found or not executable: $repeat_script" >&2
@@ -131,6 +136,7 @@ session_stamp="$(date -u +%Y%m%dT%H%M%SZ)-pid$$"
 
 mode="inherit"
 backend="codex"
+backend_set=0
 mode_set=0
 interactive=0
 prompt_kind=""
@@ -177,6 +183,20 @@ is_backend_name() {
       return 1
       ;;
   esac
+}
+
+command_exists() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+auto_select_backend() {
+  if ((backend_set)); then
+    return
+  fi
+
+  if [[ "$backend" == "codex" ]] && ! command_exists codex && command_exists opencode; then
+    backend="opencode"
+  fi
 }
 
 default_session_dir_for_dir() {
@@ -369,7 +389,7 @@ choose_with_arrows() {
         index=$(( (index + 1) % count ))
         ;;
       $'\x1b')
-        IFS= read -rsn2 -t 0.1 rest || true
+        IFS= read -rsn2 -t "$arrow_key_read_timeout" rest || true
         case "$rest" in
           "[D") index=$(( (index - 1 + count) % count )) ;;
           "[C") index=$(( (index + 1) % count )) ;;
@@ -762,11 +782,13 @@ while (($# > 0)); do
   case "$1" in
     --backend=*)
       backend="${1#*=}"
+      backend_set=1
       shift
       ;;
     --backend)
       require_value "$1" "$@"
       backend="$2"
+      backend_set=1
       shift 2
       ;;
     --mode=*)
@@ -962,6 +984,8 @@ if ! [[ "$count" =~ ^[1-9][0-9]*$ ]]; then
   echo "--count must be an integer >= 1" >&2
   exit 2
 fi
+
+auto_select_backend
 
 if ! is_backend_name "$backend"; then
   echo "unsupported backend: $backend" >&2

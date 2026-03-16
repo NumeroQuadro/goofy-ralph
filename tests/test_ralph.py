@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -17,6 +19,7 @@ class RalphCliTests(unittest.TestCase):
         cwd: Path | None = None,
         script: Path | None = None,
         input_text: str | None = None,
+        env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["bash", str(script or SCRIPT), *args],
@@ -25,6 +28,7 @@ class RalphCliTests(unittest.TestCase):
             text=True,
             capture_output=True,
             input=input_text,
+            env=env,
         )
 
     def test_help_mentions_inherited_reasoning_effort(self) -> None:
@@ -150,6 +154,32 @@ class RalphCliTests(unittest.TestCase):
         self.assertNotIn("--model", result.stdout)
         self.assertNotIn("--agent", result.stdout)
         self.assertNotIn("--skip-git-repo-check", result.stdout)
+        self.assertNotIn("codex exec", result.stdout)
+
+    def test_auto_selects_opencode_when_codex_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            bin_dir = tmp_path / "bin"
+            utility_dir = tmp_path / "utils"
+            bin_dir.mkdir()
+            utility_dir.mkdir()
+            fake_opencode = bin_dir / "opencode"
+            fake_opencode.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+            fake_opencode.chmod(0o755)
+
+            for command_name in ("bash", "sed", "dirname", "readlink", "basename", "date", "tr", "mkdir", "sleep"):
+                target = shutil.which(command_name, path="/usr/bin:/bin")
+                self.assertIsNotNone(target, command_name)
+                (utility_dir / command_name).symlink_to(target)
+
+            env = os.environ.copy()
+            env["PATH"] = f"{bin_dir}:{utility_dir}"
+
+            result = self.run_cli("--dry-run", "review this repo", env=env)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("loop_start backend=opencode", result.stdout)
+        self.assertIn("opencode_command opencode run", result.stdout)
         self.assertNotIn("codex exec", result.stdout)
 
     def test_opencode_backend_forwards_agent_model_and_extra_args(self) -> None:
