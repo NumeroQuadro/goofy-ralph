@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import os
+import pty
+import select
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -30,6 +33,66 @@ class RalphCliTests(unittest.TestCase):
             input=input_text,
             env=env,
         )
+
+    def run_cli_tty(
+        self,
+        *args: str,
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
+        interactions: list[tuple[bytes, bytes]] | None = None,
+        timeout: float = 10.0,
+    ) -> tuple[int, str]:
+        master_fd, slave_fd = pty.openpty()
+        proc = subprocess.Popen(
+            ["bash", str(SCRIPT), *args],
+            cwd=str(cwd or REPO_ROOT),
+            env=env,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            text=False,
+            close_fds=True,
+        )
+        os.close(slave_fd)
+
+        interactions = interactions or []
+        interaction_index = 0
+        chunks: list[bytes] = []
+        deadline = time.monotonic() + timeout
+
+        try:
+            while time.monotonic() < deadline:
+                ready, _, _ = select.select([master_fd], [], [], 0.2)
+                if ready:
+                    try:
+                        data = os.read(master_fd, 4096)
+                    except OSError:
+                        break
+                    if not data:
+                        break
+                    chunks.append(data)
+                    output = b"".join(chunks)
+                    while interaction_index < len(interactions):
+                        expected, response = interactions[interaction_index]
+                        if expected not in output:
+                            break
+                        os.write(master_fd, response)
+                        interaction_index += 1
+                elif proc.poll() is not None:
+                    break
+            else:
+                proc.terminate()
+        finally:
+            try:
+                os.close(master_fd)
+            except OSError:
+                pass
+
+        if proc.poll() is None:
+            proc.kill()
+        returncode = proc.wait(timeout=5)
+        output_text = b"".join(chunks).decode("utf-8", errors="replace")
+        return returncode, output_text
 
     def test_help_mentions_inherited_reasoning_effort(self) -> None:
         result = self.run_cli("--help")
@@ -368,6 +431,50 @@ class RalphCliTests(unittest.TestCase):
         self.assertIn("backend=opencode", result.stdout)
         self.assertIn("agent=build", result.stdout)
         self.assertIn("opencode_command opencode run", result.stdout)
+
+    def test_interactive_tty_skips_custom_count_selector_and_keeps_delay_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            prompt_path = tmp_path / "RALPH.md"
+            prompt_path.write_text("interactive tty prompt", encoding="utf-8")
+            bin_dir = tmp_path / "bin"
+            bin_dir.mkdir()
+            opencode_path = bin_dir / "opencode"
+            opencode_path.write_text(
+                "#!/usr/bin/env bash\n"
+                "echo \"stub opencode $*\"\n",
+                encoding="utf-8",
+            )
+            opencode_path.chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = f"{bin_dir}:{env['PATH']}"
+
+            returncode, output = self.run_cli_tty(
+                "--backend",
+                "opencode",
+                "-n",
+                "15",
+                cwd=tmp_path,
+                env=env,
+                interactions=[
+                    (b"Model: < backend default >", b"\n"),
+                    (b"Agent override (blank keeps current opencode agent):", b"\n"),
+                    (b"How many runs [15]:", b"1\n"),
+                    (b"Delay: < 0 >", b"\n"),
+                    (b"Prompt source: < file >", b"\n"),
+                    (b"Prompt file path [RALPH.md]:", b"\n"),
+                    (b"Continue on error: < no >", b"\n"),
+                    (b"Dry run: < no >", b"\n"),
+                    (b"Launch now: < yes >", b"\n"),
+                ],
+            )
+
+        self.assertEqual(returncode, 0, output)
+        self.assertNotIn("Run count: < custom >", output)
+        self.assertIn("How many runs [15]: 1", output)
+        self.assertIn("Delay: 0", output)
+        self.assertNotIn("Delay: custom", output)
+        self.assertIn("loop_start backend=opencode total_runs=1", output)
 
     def test_interactive_menu_prefills_ralph_md_as_default_prompt_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

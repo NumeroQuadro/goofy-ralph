@@ -117,6 +117,24 @@ array_get() {
   eval "printf '%s' \"\${${array_name}[$index]-}\""
 }
 
+array_contains() {
+  local array_name="$1"
+  local expected_value="$2"
+  local count=0
+  local index=0
+  local current_value=""
+
+  count="$(array_length "$array_name")"
+  for ((index = 0; index < count; index++)); do
+    current_value="$(array_get "$array_name" "$index")"
+    if [[ "$current_value" == "$expected_value" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 script_path="$(resolve_script_path "${BASH_SOURCE[0]}")"
 repo_root="$(cd "$(dirname "$script_path")/.." && pwd)"
 repeat_script="${repo_root}/scripts/repeat_codex_prompt.sh"
@@ -285,6 +303,12 @@ prompt_with_default() {
   local default_value="$2"
   local __resultvar="$3"
   local answer=""
+
+  # The arrow-menu path uses single-key reads. Restoring a sane TTY here keeps
+  # line prompts visible and editable on older macOS Bash sessions.
+  if [[ -t 0 ]]; then
+    stty sane <&0 >/dev/null 2>&1 || true
+  fi
 
   if [[ -n "$default_value" ]]; then
     read -r -p "${message} [${default_value}]: " answer
@@ -495,7 +519,7 @@ choose_model_interactive() {
     selection="__MODE_DEFAULT__"
   else
     selection="$current_value"
-    if [[ ! " ${model_values[*]} " =~ [[:space:]]${selection}[[:space:]] ]]; then
+    if ! array_contains model_values "$selection"; then
       selection="__CUSTOM__"
     fi
   fi
@@ -527,6 +551,7 @@ choose_count_interactive() {
   local current_value="$1"
   local __resultvar="$2"
   local selection="$current_value"
+  local show_selector=1
   local count_values=("1" "2" "3" "5" "10" "20" "__CUSTOM__")
   local count_labels=("1" "2" "3" "5" "10" "20" "custom")
   local count_descriptions=(
@@ -539,11 +564,12 @@ choose_count_interactive() {
     "type any positive integer"
   )
 
-  if [[ ! " ${count_values[*]} " =~ [[:space:]]${selection}[[:space:]] ]]; then
+  if ! array_contains count_values "$selection"; then
     selection="__CUSTOM__"
+    show_selector=0
   fi
 
-  if [[ -t 0 && -t 1 ]]; then
+  if [[ -t 0 && -t 1 && "$show_selector" -eq 1 ]]; then
     choose_with_arrows "Run count" selection "$selection" count_values count_labels count_descriptions
     if [[ "$selection" == "__CUSTOM__" ]]; then
       while true; do
@@ -573,6 +599,7 @@ choose_delay_interactive() {
   local current_value="$1"
   local __resultvar="$2"
   local selection="$current_value"
+  local show_selector=1
   local delay_values=("0" "1" "2" "5" "__CUSTOM__")
   local delay_labels=("0" "1" "2" "5" "custom")
   local delay_descriptions=(
@@ -583,11 +610,12 @@ choose_delay_interactive() {
     "type any non-negative number"
   )
 
-  if [[ ! " ${delay_values[*]} " =~ [[:space:]]${selection}[[:space:]] ]]; then
+  if ! array_contains delay_values "$selection"; then
     selection="__CUSTOM__"
+    show_selector=0
   fi
 
-  if [[ -t 0 && -t 1 ]]; then
+  if [[ -t 0 && -t 1 && "$show_selector" -eq 1 ]]; then
     choose_with_arrows "Delay" selection "$selection" delay_values delay_labels delay_descriptions
     if [[ "$selection" == "__CUSTOM__" ]]; then
       while true; do
