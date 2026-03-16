@@ -32,6 +32,8 @@ class RalphCliTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0)
         self.assertIn("ralph [mode]", result.stdout)
+        self.assertIn("--backend BACKEND", result.stdout)
+        self.assertIn("opencode run", result.stdout)
         self.assertIn("plain `codex` would use", result.stdout)
         self.assertIn("custom model override manually", result.stdout)
         self.assertIn("default         Use the explicit Codex preset", result.stdout)
@@ -92,7 +94,7 @@ class RalphCliTests(unittest.TestCase):
             result = self.run_cli("--dry-run", "default", "-n", "2", f"--prompt={prompt_path}")
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("loop_start total_runs=2", result.stdout)
+        self.assertIn("loop_start backend=codex total_runs=2", result.stdout)
         self.assertIn("iteration_start iteration=1/2 current=1 total=2", result.stdout)
         self.assertIn("prompt_chars=15", result.stdout)
         self.assertIn("--dangerously-bypass-approvals-and-sandbox", result.stdout)
@@ -109,7 +111,7 @@ class RalphCliTests(unittest.TestCase):
             result = self.run_cli("--dry-run", "default", cwd=tmp_path)
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("loop_start total_runs=5", result.stdout)
+        self.assertIn("loop_start backend=codex total_runs=5", result.stdout)
         self.assertIn("prompt_source=file:RALPH.md", result.stdout)
         self.assertIn("prompt_chars=19", result.stdout)
 
@@ -137,6 +139,52 @@ class RalphCliTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("-m gpt-5.4", result.stdout)
+
+    def test_opencode_backend_inherits_current_defaults_when_not_overridden(self) -> None:
+        result = self.run_cli("--dry-run", "--backend", "opencode", "review this repo")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("loop_start backend=opencode", result.stdout)
+        self.assertIn("opencode_command opencode run", result.stdout)
+        self.assertIn("PROMPT_TEXT", result.stdout)
+        self.assertNotIn("--model", result.stdout)
+        self.assertNotIn("--agent", result.stdout)
+        self.assertNotIn("--skip-git-repo-check", result.stdout)
+        self.assertNotIn("codex exec", result.stdout)
+
+    def test_opencode_backend_forwards_agent_model_and_extra_args(self) -> None:
+        result = self.run_cli(
+            "--dry-run",
+            "--backend",
+            "opencode",
+            "--agent",
+            "build",
+            "--model",
+            "anthropic/claude-sonnet-4",
+            "review this repo",
+            "--",
+            "--format",
+            "json",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("opencode_command opencode run", result.stdout)
+        self.assertIn("--agent build", result.stdout)
+        self.assertIn("--model anthropic/claude-sonnet-4", result.stdout)
+        self.assertIn("--format json", result.stdout)
+
+    def test_opencode_backend_rejects_codex_only_profile_flag(self) -> None:
+        result = self.run_cli(
+            "--dry-run",
+            "--backend",
+            "opencode",
+            "--profile",
+            "default",
+            "review this repo",
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--profile is only supported with --backend codex", result.stderr)
 
     def test_symlink_invocation_resolves_repo_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -259,11 +307,37 @@ class RalphCliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("ralph interactive setup", result.stdout)
         self.assertIn("mode=default", result.stdout)
-        self.assertIn("loop_start total_runs=2", result.stdout)
+        self.assertIn("loop_start backend=codex total_runs=2", result.stdout)
         self.assertIn("prompt_source=file:", result.stdout)
         self.assertIn("--dangerously-bypass-approvals-and-sandbox", result.stdout)
         self.assertNotIn(" -m ", result.stdout)
         self.assertNotIn("model_reasoning_effort", result.stdout)
+
+    def test_interactive_menu_can_launch_opencode_backend_with_agent_override(self) -> None:
+        result = self.run_cli(
+            "--interactive",
+            "--backend",
+            "opencode",
+            input_text="\n".join(
+                [
+                    "",
+                    "build",
+                    "2",
+                    "0",
+                    "2",
+                    "review this repo",
+                    "n",
+                    "y",
+                    "",
+                ]
+            )
+            + "\n",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("backend=opencode", result.stdout)
+        self.assertIn("agent=build", result.stdout)
+        self.assertIn("opencode_command opencode run", result.stdout)
 
     def test_interactive_menu_prefills_ralph_md_as_default_prompt_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

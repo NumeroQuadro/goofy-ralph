@@ -14,6 +14,7 @@ Usage:
   __CMD__
 
 Options:
+  --backend BACKEND        Runner backend: codex or opencode (default: codex).
   --mode MODE              Execution mode / permissions profile for codex exec
                            (default: inherit).
                            Modes:
@@ -35,8 +36,9 @@ Options:
   --prompt-file PATH       Read prompt text from file.
   -n, --count N            Number of runs (default: 5).
   --delay SECONDS          Sleep between runs (default: 0).
-  --model MODEL            Pass model to codex exec (-m).
+  --model MODEL            Pass model to the selected backend.
   --profile PROFILE        Pass profile to codex exec (-p).
+  --agent AGENT            Pass agent to opencode run (--agent).
   --cd DIR                 Override the default working directory.
                            Default: the directory where you launched __CMD__.
   --out-dir DIR            Override the default output directory.
@@ -46,8 +48,12 @@ Options:
   -h, --help               Show this help.
 
 Notes:
+  - `--backend codex` runs `codex exec`; `--backend opencode` runs
+    `opencode run`.
   - `default` keeps the same model/reasoning that plain `codex` would use,
     while still forcing `--dangerously-bypass-approvals-and-sandbox`.
+  - With `--backend opencode`, `ralph` inherits the current opencode model
+    and agent defaults unless you pass `--model` or `--agent`.
   - `inherit` keeps the current Codex config/profile instead.
   - If no prompt is supplied, non-interactive runs use `RALPH.md` from the
     effective working directory when that file exists.
@@ -68,6 +74,7 @@ Notes:
 
 Examples:
   __CMD__ default -n 10 --prompt prompt.md
+  __CMD__ --backend opencode --agent build -n 3 --prompt prompt.md
   __CMD__ full-auto -n 5 --prompt "review this repo and list TODOs"
   __CMD__ read-only --prompt prompt.txt -- --json
   __CMD__
@@ -123,6 +130,7 @@ launch_dir="$(pwd)"
 session_stamp="$(date -u +%Y%m%dT%H%M%SZ)-pid$$"
 
 mode="inherit"
+backend="codex"
 mode_set=0
 interactive=0
 prompt_kind=""
@@ -131,6 +139,7 @@ count=5
 delay=0
 model=""
 profile=""
+agent=""
 workdir="$launch_dir"
 out_dir=""
 out_dir_explicit=0
@@ -151,6 +160,17 @@ require_value() {
 is_mode_name() {
   case "$1" in
     inherit|default|current|read-only|workspace-write|full-auto|danger|danger-full-access)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+is_backend_name() {
+  case "$1" in
+    codex|opencode)
       return 0
       ;;
     *)
@@ -443,11 +463,11 @@ choose_model_interactive() {
     "__CUSTOM__"
   )
   local model_labels=(
-    "codex default"
+    "backend default"
     "custom"
   )
   local model_descriptions=(
-    "use the same model and reasoning that plain codex uses"
+    "use the current backend default model"
     "type any model id manually"
   )
 
@@ -463,7 +483,7 @@ choose_model_interactive() {
   if [[ -t 0 && -t 1 ]]; then
     choose_with_arrows "Model" selection "$selection" model_values model_labels model_descriptions
   else
-    prompt_with_default "Model override (blank keeps plain codex defaults)" "$current_value" current_value
+    prompt_with_default "Model override (blank keeps current backend defaults)" "$current_value" current_value
     printf -v "$__resultvar" '%s' "$current_value"
     return
   fi
@@ -653,6 +673,7 @@ configure_interactive() {
   local delay_value="$delay"
   local model_value="$model"
   local profile_value="$profile"
+  local agent_value="$agent"
   local workdir_value="$workdir"
   local out_dir_value="$out_dir"
   local continue_value="no"
@@ -669,9 +690,19 @@ configure_interactive() {
   echo "${command_name} interactive setup"
   echo "launch_dir=${launch_dir}"
 
-  choose_mode_interactive
+  if [[ "$backend" == "codex" ]]; then
+    choose_mode_interactive
+  else
+    mode="inherit"
+  fi
   choose_model_interactive "$model_value" model_value
-  prompt_with_default "Profile override (blank keeps current profile)" "$profile_value" profile_value
+  if [[ "$backend" == "codex" ]]; then
+    prompt_with_default "Profile override (blank keeps current profile)" "$profile_value" profile_value
+    agent_value=""
+  else
+    prompt_with_default "Agent override (blank keeps current opencode agent)" "$agent_value" agent_value
+    profile_value=""
+  fi
   choose_count_interactive "$run_count" run_count
   choose_delay_interactive "$delay_value" delay_value
 
@@ -685,9 +716,14 @@ configure_interactive() {
 
   echo
   echo "Summary:"
+  echo "  backend=${backend}"
   echo "  mode=${mode}"
-  echo "  model=${model_value:-<plain codex default>}"
-  echo "  profile=${profile_value:-<inherit>}"
+  echo "  model=${model_value:-<current ${backend} default>}"
+  if [[ "$backend" == "codex" ]]; then
+    echo "  profile=${profile_value:-<inherit>}"
+  else
+    echo "  agent=${agent_value:-<current opencode default>}"
+  fi
   echo "  count=${run_count}"
   echo "  delay=${delay_value}"
   echo "  prompt_${prompt_kind}=${prompt_value}"
@@ -706,6 +742,7 @@ configure_interactive() {
   delay="$delay_value"
   model="$model_value"
   profile="$profile_value"
+  agent="$agent_value"
   workdir="$workdir_value"
   out_dir="$out_dir_value"
   continue_on_error=0
@@ -723,6 +760,15 @@ positional_prompt=""
 
 while (($# > 0)); do
   case "$1" in
+    --backend=*)
+      backend="${1#*=}"
+      shift
+      ;;
+    --backend)
+      require_value "$1" "$@"
+      backend="$2"
+      shift 2
+      ;;
     --mode=*)
       ((mode_set == 0)) || {
         echo "mode specified more than once" >&2
@@ -811,6 +857,10 @@ while (($# > 0)); do
       delay="${1#*=}"
       shift
       ;;
+    --agent=*)
+      agent="${1#*=}"
+      shift
+      ;;
     --cd=*)
       workdir="${1#*=}"
       if ((out_dir_explicit == 0)); then
@@ -823,12 +873,13 @@ while (($# > 0)); do
       out_dir_explicit=1
       shift
       ;;
-    --delay|--model|--profile|--cd|--out-dir)
+    --delay|--model|--profile|--agent|--cd|--out-dir)
       require_value "$1" "$@"
       case "$1" in
         --delay) delay="$2" ;;
         --model) model="$2" ;;
         --profile) profile="$2" ;;
+        --agent) agent="$2" ;;
         --cd)
           workdir="$2"
           if ((out_dir_explicit == 0)); then
@@ -912,33 +963,61 @@ if ! [[ "$count" =~ ^[1-9][0-9]*$ ]]; then
   exit 2
 fi
 
-mode_args=()
-case "$mode" in
-  inherit|current)
-    ;;
-  default)
-    mode_args=(--dangerously-bypass-approvals-and-sandbox)
-    ;;
-  read-only)
-    mode_args=(--sandbox read-only)
-    ;;
-  workspace-write)
-    mode_args=(--sandbox workspace-write)
-    ;;
-  full-auto)
-    mode_args=(--full-auto)
-    ;;
-  danger|danger-full-access)
-    mode_args=(--dangerously-bypass-approvals-and-sandbox)
-    ;;
-  *)
-    echo "unsupported mode: $mode" >&2
-    echo "supported modes: inherit, default, read-only, workspace-write, full-auto, danger" >&2
-    exit 2
-    ;;
-esac
+if ! is_backend_name "$backend"; then
+  echo "unsupported backend: $backend" >&2
+  echo "supported backends: codex, opencode" >&2
+  exit 2
+fi
 
-forward_args=(--count "$count" --delay "$delay" --cd "$workdir" --out-dir "$out_dir")
+if [[ "$backend" == "codex" && -n "$agent" ]]; then
+  echo "--agent is only supported with --backend opencode" >&2
+  exit 2
+fi
+
+if [[ "$backend" == "opencode" && -n "$profile" ]]; then
+  echo "--profile is only supported with --backend codex" >&2
+  exit 2
+fi
+
+mode_args=()
+if [[ "$backend" == "codex" ]]; then
+  case "$mode" in
+    inherit|current)
+      ;;
+    default)
+      mode_args=(--dangerously-bypass-approvals-and-sandbox)
+      ;;
+    read-only)
+      mode_args=(--sandbox read-only)
+      ;;
+    workspace-write)
+      mode_args=(--sandbox workspace-write)
+      ;;
+    full-auto)
+      mode_args=(--full-auto)
+      ;;
+    danger|danger-full-access)
+      mode_args=(--dangerously-bypass-approvals-and-sandbox)
+      ;;
+    *)
+      echo "unsupported mode: $mode" >&2
+      echo "supported modes: inherit, default, read-only, workspace-write, full-auto, danger" >&2
+      exit 2
+      ;;
+  esac
+else
+  case "$mode" in
+    inherit|current|default)
+      mode="inherit"
+      ;;
+    *)
+      echo "--backend opencode only supports inherit/current/default mode semantics" >&2
+      exit 2
+      ;;
+  esac
+fi
+
+forward_args=(--backend "$backend" --count "$count" --delay "$delay" --cd "$workdir" --out-dir "$out_dir")
 
 if [[ -n "$model" ]]; then
   forward_args+=(--model "$model")
@@ -946,6 +1025,10 @@ fi
 
 if [[ -n "$profile" ]]; then
   forward_args+=(--profile "$profile")
+fi
+
+if [[ -n "$agent" ]]; then
+  forward_args+=(--agent "$agent")
 fi
 
 if [[ "$prompt_kind" == "file" ]]; then
@@ -962,7 +1045,10 @@ if ((dry_run)); then
   forward_args+=(--dry-run)
 fi
 
-common_exec_args=(--skip-git-repo-check)
+common_exec_args=()
+if [[ "$backend" == "codex" ]]; then
+  common_exec_args=(--skip-git-repo-check)
+fi
 cmd=("$repeat_script" "${forward_args[@]}")
 
 if ((${#common_exec_args[@]} > 0 || ${#mode_args[@]} > 0 || ${#extra_args[@]} > 0)); then

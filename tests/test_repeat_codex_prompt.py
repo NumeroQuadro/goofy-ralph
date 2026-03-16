@@ -32,7 +32,7 @@ class RepeatCodexPromptTests(unittest.TestCase):
         loop_ids = re.findall(r"loop_id=([^\s]+)", result.stdout)
         self.assertTrue(loop_ids)
         self.assertEqual(len(set(loop_ids)), 1)
-        self.assertIn("loop_start total_runs=2", result.stdout)
+        self.assertIn("loop_start backend=codex total_runs=2", result.stdout)
         self.assertIn("prompt_source=file:", result.stdout)
         self.assertIn("iteration=1/2", result.stdout)
         self.assertIn("iteration_start iteration=1/2 current=1 total=2", result.stdout)
@@ -41,6 +41,57 @@ class RepeatCodexPromptTests(unittest.TestCase):
         self.assertIn("codex_command codex exec", result.stdout)
         self.assertIn("next_iteration=2/2", result.stdout)
         self.assertIn("loop_done total_runs=2", result.stdout)
+
+    def test_opencode_backend_dry_run_builds_backend_specific_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            prompt_path = tmp_path / "prompt.txt"
+            out_dir = tmp_path / "runs"
+            prompt_path.write_text("review this repo", encoding="utf-8")
+
+            result = self.run_script(
+                "--dry-run",
+                "--backend",
+                "opencode",
+                "--agent",
+                "build",
+                "--model",
+                "anthropic/claude-sonnet-4",
+                "--cd",
+                str(tmp_path),
+                "--out-dir",
+                str(out_dir),
+                "--prompt-file",
+                str(prompt_path),
+                "--",
+                "--format",
+                "json",
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("loop_start backend=opencode", result.stdout)
+        self.assertIn("opencode_command opencode run", result.stdout)
+        self.assertIn("--agent build", result.stdout)
+        self.assertIn("--model anthropic/claude-sonnet-4", result.stdout)
+        self.assertIn("--format json", result.stdout)
+        self.assertIn("PROMPT_TEXT", result.stdout)
+        self.assertIn(f"workdir={tmp_path}", result.stdout)
+        self.assertIn(f"run_output={out_dir}/run_001.txt", result.stdout)
+        self.assertNotIn("codex exec", result.stdout)
+
+    def test_opencode_backend_rejects_codex_profile_flag(self) -> None:
+        result = self.run_script(
+            "--dry-run",
+            "--backend",
+            "opencode",
+            "--profile",
+            "default",
+            "--prompt",
+            "hello",
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--profile is only supported with --backend codex", result.stderr)
 
     def test_empty_prompt_file_warns_and_exits(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

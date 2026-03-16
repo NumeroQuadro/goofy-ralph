@@ -117,6 +117,6 @@ if ! path_contains_dir "$bin_dir"; then
   echo "  export PATH=\"${bin_dir}:\$PATH\""
 fi
 
-if ! command -v codex >/dev/null 2>&1; then
-  echo "warning: codex is not currently on PATH; install the Codex CLI before running ralph" >&2
+if ! command -v codex >/dev/null 2>&1 && ! command -v opencode >/dev/null 2>&1; then
+  echo "warning: neither codex nor opencode is currently on PATH; install at least one backend before running ralph" >&2
 fi

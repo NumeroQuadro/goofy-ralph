@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Repeat the same prompt against local `codex exec` multiple times.
+Repeat the same prompt against local `codex exec` or `opencode run` multiple times.
 
 Usage:
   scripts/repeat_codex_prompt.sh --prompt "Your prompt" [options] [-- <extra codex exec args>]
@@ -11,13 +11,15 @@ Usage:
   cat prompt.txt | scripts/repeat_codex_prompt.sh [options]
 
 Options:
+  --backend BACKEND        Runner to use: codex or opencode (default: codex).
   --prompt TEXT            Prompt text to send each run.
   --prompt-file PATH       Read prompt text from file.
   --count N                Number of runs (default: 3).
   --delay SECONDS          Sleep between runs (default: 0).
-  --model MODEL            Pass model to codex exec (-m).
+  --model MODEL            Pass model to the selected backend.
   --profile PROFILE        Pass profile to codex exec (-p).
-  --cd DIR                 Pass working directory to codex exec (-C).
+  --agent AGENT            Pass agent to opencode run (--agent).
+  --cd DIR                 Run the backend inside DIR.
   --out-dir DIR            Save last message per run as run_###.txt.
   --continue-on-error      Continue remaining runs if one fails.
   --dry-run                Print commands without executing.
@@ -35,15 +37,22 @@ Examples:
     --count 10 \
     --model gpt-5 \
     -- --json
+
+  scripts/repeat_codex_prompt.sh \
+    --backend opencode \
+    --agent build \
+    --prompt "review this repo and list TODOs"
 EOF
 }
 
+backend="codex"
 prompt=""
 prompt_file=""
 count=3
 delay=0
 model=""
 profile=""
+agent=""
 workdir=""
 out_dir=""
 continue_on_error=0
@@ -82,6 +91,15 @@ require_value() {
 
 while (($# > 0)); do
   case "$1" in
+    --backend=*)
+      backend="${1#*=}"
+      shift
+      ;;
+    --backend)
+      require_value "$1" "$@"
+      backend="$2"
+      shift 2
+      ;;
     --prompt=*)
       prompt="${1#*=}"
       prompt_source="flag"
@@ -140,6 +158,15 @@ while (($# > 0)); do
       profile="$2"
       shift 2
       ;;
+    --agent=*)
+      agent="${1#*=}"
+      shift
+      ;;
+    --agent)
+      require_value "$1" "$@"
+      agent="$2"
+      shift 2
+      ;;
     --cd=*)
       workdir="${1#*=}"
       shift
@@ -193,6 +220,25 @@ if ! [[ "$count" =~ ^[1-9][0-9]*$ ]]; then
   exit 2
 fi
 
+case "$backend" in
+  codex|opencode)
+    ;;
+  *)
+    log_stderr "error --backend must be codex or opencode"
+    exit 2
+    ;;
+esac
+
+if [[ "$backend" == "codex" && -n "$agent" ]]; then
+  log_stderr "error --agent is only supported with --backend opencode"
+  exit 2
+fi
+
+if [[ "$backend" == "opencode" && -n "$profile" ]]; then
+  log_stderr "error --profile is only supported with --backend codex"
+  exit 2
+fi
+
 prompt_text=""
 if [[ -n "$prompt_file" ]]; then
   if [[ ! -f "$prompt_file" ]]; then
@@ -219,35 +265,96 @@ if [[ -n "$out_dir" ]]; then
 fi
 
 log_stdout \
-  "loop_start total_runs=${count} prompt_source=${prompt_source} prompt_chars=${#prompt_text} continue_on_error=${continue_on_error} dry_run=${dry_run}"
+  "loop_start backend=${backend} total_runs=${count} prompt_source=${prompt_source} prompt_chars=${#prompt_text} continue_on_error=${continue_on_error} dry_run=${dry_run}"
 
 for ((i = 1; i <= count; i++)); do
   iteration="${i}/${count}"
   log_stdout "iteration_start iteration=${iteration} current=${i} total=${count}"
 
-  cmd=(codex exec)
-  [[ -n "$model" ]] && cmd+=(-m "$model")
-  [[ -n "$profile" ]] && cmd+=(-p "$profile")
-  [[ -n "$workdir" ]] && cmd+=(-C "$workdir")
-  cmd+=("${extra_args[@]}")
+  cmd=()
+  cmd_for_log=()
+  command_log_name="${backend}_command"
+  execution_workdir="${workdir:-$(pwd)}"
+  use_stdout_capture=0
+
+  case "$backend" in
+    codex)
+      cmd=(codex exec)
+      cmd_for_log=(codex exec)
+      [[ -n "$model" ]] && {
+        cmd+=(-m "$model")
+        cmd_for_log+=(-m "$model")
+      }
+      [[ -n "$profile" ]] && {
+        cmd+=(-p "$profile")
+        cmd_for_log+=(-p "$profile")
+      }
+      [[ -n "$workdir" ]] && {
+        cmd+=(-C "$workdir")
+        cmd_for_log+=(-C "$workdir")
+      }
+      cmd+=("${extra_args[@]}")
+      cmd_for_log+=("${extra_args[@]}")
+      ;;
+    opencode)
+      cmd=(opencode run)
+      cmd_for_log=(opencode run)
+      [[ -n "$model" ]] && {
+        cmd+=(--model "$model")
+        cmd_for_log+=(--model "$model")
+      }
+      [[ -n "$agent" ]] && {
+        cmd+=(--agent "$agent")
+        cmd_for_log+=(--agent "$agent")
+      }
+      cmd+=("${extra_args[@]}" "$prompt_text")
+      cmd_for_log+=("${extra_args[@]}" "PROMPT_TEXT")
+      use_stdout_capture=1
+      ;;
+  esac
 
   run_output=""
   if [[ -n "$out_dir" ]]; then
     printf -v run_num "%03d" "$i"
     run_output="${out_dir}/run_${run_num}.txt"
-    cmd+=(-o "$run_output")
+    if [[ "$backend" == "codex" ]]; then
+      cmd+=(-o "$run_output")
+      cmd_for_log+=(-o "$run_output")
+    fi
   fi
-  cmd+=(-)
+  if [[ "$backend" == "codex" ]]; then
+    cmd+=(-)
+    cmd_for_log+=(-)
+  fi
 
-  log_stdout "workdir=${workdir:-<inherit>} out_dir=${out_dir:-<none>} run_output=${run_output:-<none>}"
-  log_stdout "codex_command $(describe_cmd "${cmd[@]}")"
+  log_stdout "workdir=${execution_workdir} out_dir=${out_dir:-<none>} run_output=${run_output:-<none>}"
+  log_stdout "${command_log_name} $(describe_cmd "${cmd_for_log[@]}")"
 
   if ((dry_run)); then
     log_stdout "iteration_dry_run iteration=${iteration} current=${i} total=${count}"
   else
     set +e
-    printf '%s\n' "$prompt_text" | "${cmd[@]}"
-    status=$?
+    case "$backend" in
+      codex)
+        printf '%s\n' "$prompt_text" | "${cmd[@]}"
+        status=$?
+        ;;
+      opencode)
+        if ((use_stdout_capture)) && [[ -n "$run_output" ]]; then
+          (
+            cd "$execution_workdir"
+            "${cmd[@]}"
+          ) | tee "$run_output"
+          status=$?
+        else
+          (
+            cd "$execution_workdir"
+            "${cmd[@]}"
+          )
+          status=$?
+        fi
+        ;;
+    esac
     set -e
 
     if ((status != 0)); then

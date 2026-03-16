@@ -6,8 +6,9 @@ It is designed to work from a clone located anywhere on Linux or macOS, includin
 
 ## Requirements
 
-- `codex` available on `PATH`
 - `bash`
+- `codex` on `PATH` if you want the default backend
+- `opencode` on `PATH` if you want `--backend opencode`
 
 ## Install
 
@@ -17,6 +18,18 @@ Clone the repo anywhere and run the installer:
 git clone git@github.com:NumeroQuadro/goofy-ralph.git
 cd goofy-ralph
 ./install.sh
+```
+
+For a curl-style bootstrap install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/NumeroQuadro/goofy-ralph/main/bootstrap.sh | bash
+```
+
+To force a specific bin directory with the curl bootstrap:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/NumeroQuadro/goofy-ralph/main/bootstrap.sh | bash -s -- --bin-dir /usr/local/bin
 ```
 
 `install.sh` installs `ralph` into:
@@ -46,6 +59,12 @@ Direct mode:
 ralph default -n 10 --prompt prompt.txt
 ```
 
+OpenCode backend:
+
+```bash
+ralph --backend opencode --agent build -n 3 --prompt prompt.txt
+```
+
 Inline prompt:
 
 ```bash
@@ -63,8 +82,14 @@ Defaults:
 - prompt file: `RALPH.md` from the effective working directory, when present
 - run count: `5`
 - output directory: `<effective-workdir>/.ralph/<timestamp-pid>/`
+- backend: `codex` unless you pass `--backend opencode`
 
-The helper runner lives at `scripts/repeat_codex_prompt.sh`.
+Backend notes:
+
+- `codex` keeps the existing `ralph` mode behavior (`default`, `read-only`, `full-auto`, and so on)
+- `opencode` inherits the current opencode model/agent setup unless you override `--model` or `--agent`
+
+The helper runner lives at `scripts/repeat_codex_prompt.sh` and now supports both backends.
 
 ## Tests
 
