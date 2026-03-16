@@ -79,6 +79,20 @@ class RepeatCodexPromptTests(unittest.TestCase):
         self.assertIn(f"run_output={out_dir}/run_001.txt", result.stdout)
         self.assertNotIn("codex exec", result.stdout)
 
+    def test_opencode_backend_dry_run_without_extra_args_is_supported(self) -> None:
+        result = self.run_script(
+            "--dry-run",
+            "--backend",
+            "opencode",
+            "--prompt",
+            "hello from opencode",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("loop_start backend=opencode", result.stdout)
+        self.assertIn("opencode_command opencode run PROMPT_TEXT", result.stdout)
+        self.assertNotIn("error backend command not found", result.stderr)
+
     def test_opencode_backend_rejects_codex_profile_flag(self) -> None:
         result = self.run_script(
             "--dry-run",

@@ -298,8 +298,10 @@ for ((i = 1; i <= count; i++)); do
         cmd+=(-C "$workdir")
         cmd_for_log+=(-C "$workdir")
       }
-      cmd+=("${extra_args[@]}")
-      cmd_for_log+=("${extra_args[@]}")
+      if ((${#extra_args[@]} > 0)); then
+        cmd+=("${extra_args[@]}")
+        cmd_for_log+=("${extra_args[@]}")
+      fi
       ;;
     opencode)
       cmd=(opencode run)
@@ -312,8 +314,12 @@ for ((i = 1; i <= count; i++)); do
         cmd+=(--agent "$agent")
         cmd_for_log+=(--agent "$agent")
       }
-      cmd+=("${extra_args[@]}" "$prompt_text")
-      cmd_for_log+=("${extra_args[@]}" "PROMPT_TEXT")
+      if ((${#extra_args[@]} > 0)); then
+        cmd+=("${extra_args[@]}")
+        cmd_for_log+=("${extra_args[@]}")
+      fi
+      cmd+=("$prompt_text")
+      cmd_for_log+=("PROMPT_TEXT")
       use_stdout_capture=1
       ;;
   esac
