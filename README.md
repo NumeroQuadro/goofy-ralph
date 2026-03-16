@@ -2,13 +2,40 @@
 
 `ralph` is a small CLI wrapper around `codex exec` for running the same prompt repeatedly from the directory where you launch it.
 
+It is designed to work from a clone located anywhere on Linux or macOS, including macOS machines that still use the system Bash 3.2.
+
+## Requirements
+
+- `codex` available on `PATH`
+- `bash`
+
 ## Install
 
-Clone the repo and point `/usr/local/bin/ralph` at the launcher:
+Clone the repo anywhere and run the installer:
 
 ```bash
-ln -sfn /path/to/goofy-ralph/scripts/ralph /usr/local/bin/ralph
-chmod +x /path/to/goofy-ralph/scripts/ralph /path/to/goofy-ralph/scripts/repeat_codex_prompt.sh
+git clone git@github.com:NumeroQuadro/goofy-ralph.git
+cd goofy-ralph
+./install.sh
+```
+
+`install.sh` installs `ralph` into:
+
+- `$RALPH_BIN_DIR` when you set it
+- otherwise `$HOME/.local/bin`
+
+You can also install into a specific directory:
+
+```bash
+./install.sh --bin-dir "/usr/local/bin"
+```
+
+If the installer prints a PATH hint, add that directory to your shell startup file.
+
+Manual install is still possible:
+
+```bash
+ln -sfn "/path/to/goofy-ralph/scripts/ralph" "$HOME/.local/bin/ralph"
 ```
 
 ## Usage
@@ -42,5 +69,5 @@ The helper runner lives at `scripts/repeat_codex_prompt.sh`.
 ## Tests
 
 ```bash
-python3 -m unittest tests.test_ralph tests.test_repeat_codex_prompt
+python3 -m unittest tests.test_install tests.test_ralph tests.test_repeat_codex_prompt
 ```

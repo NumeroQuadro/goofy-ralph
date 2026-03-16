@@ -74,7 +74,43 @@ Examples:
 EOF
 }
 
-script_path="$(readlink -f "${BASH_SOURCE[0]}")"
+to_lower() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+resolve_script_path() {
+  local source_path="$1"
+  local source_dir=""
+  local target_path=""
+
+  while [[ -L "$source_path" ]]; do
+    source_dir="$(cd -P "$(dirname "$source_path")" && pwd)"
+    target_path="$(readlink "$source_path")"
+    if [[ "$target_path" == /* ]]; then
+      source_path="$target_path"
+    else
+      source_path="${source_dir}/${target_path}"
+    fi
+  done
+
+  source_dir="$(cd -P "$(dirname "$source_path")" && pwd)"
+  printf '%s/%s\n' "$source_dir" "$(basename "$source_path")"
+}
+
+array_length() {
+  local array_name="$1"
+
+  eval "printf '%s' \"\${#${array_name}[@]}\""
+}
+
+array_get() {
+  local array_name="$1"
+  local index="$2"
+
+  eval "printf '%s' \"\${${array_name}[$index]-}\""
+}
+
+script_path="$(resolve_script_path "${BASH_SOURCE[0]}")"
 repo_root="$(cd "$(dirname "$script_path")/.." && pwd)"
 repeat_script="${repo_root}/scripts/repeat_codex_prompt.sh"
 
@@ -244,7 +280,7 @@ ask_yes_no() {
   while true; do
     read -r -p "${message} ${prompt_suffix}: " answer
     normalized="${answer:-$default_answer}"
-    case "${normalized,,}" in
+    case "$(to_lower "$normalized")" in
       y|yes)
         printf -v "$__resultvar" '%s' "yes"
         return
@@ -269,21 +305,32 @@ choose_with_arrows() {
   local rest=""
   local index=0
   local candidate=""
-  local -n values_ref="$values_name"
-  local -n labels_ref="$labels_name"
-  local -n descriptions_ref="$descriptions_name"
+  local count=0
+  local current_label=""
+  local current_description=""
+  local candidate_value=""
 
-  for candidate in "${!values_ref[@]}"; do
-    if [[ "${values_ref[$candidate]}" == "$default_value" ]]; then
+  count="$(array_length "$values_name")"
+  if [[ "$count" -eq 0 ]]; then
+    echo "internal error: choose_with_arrows requires at least one option" >&2
+    return 1
+  fi
+
+  for ((candidate = 0; candidate < count; candidate++)); do
+    candidate_value="$(array_get "$values_name" "$candidate")"
+    if [[ "$candidate_value" == "$default_value" ]]; then
       index="$candidate"
       break
     fi
   done
 
   while true; do
-    printf '\r\033[2K%s: < %s >' "$title" "${labels_ref[$index]}"
-    if [[ -n "${descriptions_ref[$index]:-}" ]]; then
-      printf '  %s' "${descriptions_ref[$index]}"
+    current_label="$(array_get "$labels_name" "$index")"
+    current_description="$(array_get "$descriptions_name" "$index")"
+
+    printf '\r\033[2K%s: < %s >' "$title" "$current_label"
+    if [[ -n "$current_description" ]]; then
+      printf '  %s' "$current_description"
     fi
     printf '  [←/→, Enter]'
 
@@ -296,23 +343,23 @@ choose_with_arrows() {
         break
         ;;
       h|H)
-        index=$(( (index - 1 + ${#values_ref[@]}) % ${#values_ref[@]} ))
+        index=$(( (index - 1 + count) % count ))
         ;;
       l|L)
-        index=$(( (index + 1) % ${#values_ref[@]} ))
+        index=$(( (index + 1) % count ))
         ;;
       $'\x1b')
         IFS= read -rsn2 -t 0.1 rest || true
         case "$rest" in
-          "[D") index=$(( (index - 1 + ${#values_ref[@]}) % ${#values_ref[@]} )) ;;
-          "[C") index=$(( (index + 1) % ${#values_ref[@]} )) ;;
+          "[D") index=$(( (index - 1 + count) % count )) ;;
+          "[C") index=$(( (index + 1) % count )) ;;
         esac
         ;;
     esac
   done
 
-  printf '\r\033[2K%s: %s\n' "$title" "${labels_ref[$index]}"
-  printf -v "$__resultvar" '%s' "${values_ref[$index]}"
+  printf '\r\033[2K%s: %s\n' "$title" "$(array_get "$labels_name" "$index")"
+  printf -v "$__resultvar" '%s' "$(array_get "$values_name" "$index")"
 }
 
 choose_mode_interactive() {
@@ -356,7 +403,7 @@ EOF
   while true; do
     read -r -p "Choose mode [${default_selection}]: " selection
     selection="${selection:-$default_selection}"
-    case "${selection,,}" in
+    case "$(to_lower "$selection")" in
       1|inherit|current)
         mode="inherit"
         return
@@ -564,7 +611,7 @@ choose_prompt_interactive() {
       read -r -p "Choose prompt source [${default_source}]: " source_choice
       source_choice="${source_choice:-$default_source}"
     fi
-    case "${source_choice,,}" in
+    case "$(to_lower "$source_choice")" in
       1|file)
         while true; do
           prompt_with_default "Prompt file path" "$prompt_file_default" prompt_file_default
