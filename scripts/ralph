@@ -45,6 +45,8 @@ Options:
                            Default: <effective-workdir>/.ralph/<timestamp-pid>/.
   --continue-on-error      Continue remaining runs if one fails.
   --dry-run                Print commands without executing.
+  --color                  Force ANSI color output (even when not a TTY).
+  --no-color               Disable ANSI color output.
   -h, --help               Show this help.
 
 Notes:
@@ -58,7 +60,7 @@ Notes:
   - If no prompt is supplied, non-interactive runs use `RALPH.md` from the
     effective working directory when that file exists.
   - Running `__CMD__` with no prompt in an interactive terminal opens a
-    small setup menu for backend, mode, model, prompt source, run count,
+    small setup menu for backend, mode, model, prompt selection, run count,
     and a few execution toggles, while inferring the target directory from
     where you launched the command.
   - On real TTYs, compact selectors use ←/→ (or h/l) and Enter.
@@ -71,6 +73,8 @@ Notes:
   - The wrapper always passes `--skip-git-repo-check`, so it can run from
     non-repo directories too.
   - Any arguments after -- are forwarded directly to codex exec.
+  - Color is enabled automatically on TTYs. Set `NO_COLOR=1` to disable,
+    or `RALPH_COLOR=always|never|auto` to control it.
 
 Examples:
   __CMD__ default -n 10 --prompt prompt.md
@@ -171,6 +175,16 @@ continue_on_error=0
 dry_run=0
 extra_args=()
 default_prompt_filename="RALPH.md"
+color_mode="${RALPH_COLOR:-auto}"
+color_mode_set=0
+use_color=0
+C_RESET=""
+C_BOLD=""
+C_DIM=""
+C_CYAN=""
+C_GREEN=""
+C_YELLOW=""
+C_RED=""
 
 require_value() {
   local flag="$1"
@@ -205,6 +219,54 @@ is_backend_name() {
 
 command_exists() {
   command -v "$1" >/dev/null 2>&1
+}
+
+configure_colors() {
+  local normalized=""
+
+  if [[ -n "${NO_COLOR+x}" ]]; then
+    use_color=0
+  else
+    normalized="$(to_lower "$color_mode")"
+    case "$normalized" in
+      auto|"")
+        if [[ -t 1 && "${TERM:-}" != "dumb" ]]; then
+          use_color=1
+        else
+          use_color=0
+        fi
+        ;;
+      always|force|yes|true|1)
+        use_color=1
+        ;;
+      never|no|false|0)
+        use_color=0
+        ;;
+      *)
+        echo "unsupported color mode: ${color_mode}" >&2
+        echo "supported: auto, always, never" >&2
+        exit 2
+        ;;
+    esac
+  fi
+
+  if ((use_color)); then
+    C_RESET=$'\033[0m'
+    C_BOLD=$'\033[1m'
+    C_DIM=$'\033[2m'
+    C_CYAN=$'\033[36m'
+    C_GREEN=$'\033[32m'
+    C_YELLOW=$'\033[33m'
+    C_RED=$'\033[31m'
+  else
+    C_RESET=""
+    C_BOLD=""
+    C_DIM=""
+    C_CYAN=""
+    C_GREEN=""
+    C_YELLOW=""
+    C_RED=""
+  fi
 }
 
 auto_select_backend() {
@@ -358,6 +420,23 @@ ask_yes_no() {
   done
 }
 
+ask_launch_now() {
+  local default_answer="$1"
+  local __resultvar="$2"
+  local normalized=""
+  local launch_values=("no" "yes")
+  local launch_labels=("no" "yes")
+  local launch_descriptions=("abort" "launch")
+
+  if [[ -t 0 && -t 1 ]]; then
+    choose_with_arrows "Launch now" normalized "$default_answer" launch_values launch_labels launch_descriptions
+    printf -v "$__resultvar" '%s' "$normalized"
+    return
+  fi
+
+  ask_yes_no "Launch now" "$default_answer" "$__resultvar"
+}
+
 choose_with_arrows() {
   local title="$1"
   local __resultvar="$2"
@@ -392,11 +471,11 @@ choose_with_arrows() {
     current_label="$(array_get "$labels_name" "$index")"
     current_description="$(array_get "$descriptions_name" "$index")"
 
-    printf '\r\033[2K%s: < %s >' "$title" "$current_label"
+    printf '\r\033[2K%s%s: < %s >' "$C_CYAN" "$title" "$current_label"
     if [[ -n "$current_description" ]]; then
       printf '  %s' "$current_description"
     fi
-    printf '  [←/→, Enter]'
+    printf '  [←/→, Enter]%s' "$C_RESET"
 
     IFS= read -rsn1 key || true
     case "$key" in
@@ -425,7 +504,7 @@ choose_with_arrows() {
     esac
   done
 
-  printf '\r\033[2K%s: %s\n' "$title" "$(array_get "$labels_name" "$index")"
+  printf '\r\033[2K%s%s: %s%s\n' "$C_CYAN" "$title" "$(array_get "$labels_name" "$index")" "$C_RESET"
   printf -v "$__resultvar" '%s' "$(array_get "$values_name" "$index")"
 }
 
@@ -867,13 +946,13 @@ configure_interactive() {
     dry_run_value="yes"
   fi
 
-  echo "${command_name} interactive setup"
-  echo "$rule"
-  echo "Context:"
+  echo "${C_BOLD}${command_name} interactive setup${C_RESET}"
+  echo "${C_DIM}${rule}${C_RESET}"
+  echo "${C_BOLD}Context:${C_RESET}"
   echo "  launch_dir=${launch_dir}"
   echo "  workdir=${workdir_value}"
   echo "  out_dir=${out_dir_value}"
-  echo "$rule"
+  echo "${C_DIM}${rule}${C_RESET}"
   echo
 
   choose_backend_interactive
@@ -904,8 +983,8 @@ configure_interactive() {
   ask_yes_no "Dry run" "$dry_run_value" dry_run_value
 
   echo
-  echo "$rule"
-  echo "Summary:"
+  echo "${C_DIM}${rule}${C_RESET}"
+  echo "${C_BOLD}Summary:${C_RESET}"
   echo "  backend=${backend}"
   echo "  mode=${mode}"
   echo "  model=${model_value:-<current ${backend} default>}"
@@ -921,10 +1000,10 @@ configure_interactive() {
   echo "  out_dir=${out_dir_value}"
   echo "  continue_on_error=${continue_value}"
   echo "  dry_run=${dry_run_value}"
-  echo "$rule"
+  echo "${C_DIM}${rule}${C_RESET}"
   echo
 
-  ask_yes_no "Launch now" "$should_launch" should_launch
+  ask_launch_now "$should_launch" should_launch
   if [[ "$should_launch" != "yes" ]]; then
     echo "aborted" >&2
     exit 0
@@ -1095,6 +1174,24 @@ while (($# > 0)); do
       dry_run=1
       shift
       ;;
+    --color)
+      ((color_mode_set == 0)) || {
+        echo "color option specified more than once" >&2
+        exit 2
+      }
+      color_mode="always"
+      color_mode_set=1
+      shift
+      ;;
+    --no-color)
+      ((color_mode_set == 0)) || {
+        echo "color option specified more than once" >&2
+        exit 2
+      }
+      color_mode="never"
+      color_mode_set=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -1144,6 +1241,9 @@ fi
 if ((interactive == 0)) && [[ -z "$prompt_kind" ]] && [[ -t 0 ]] && [[ -t 1 ]]; then
   interactive=1
 fi
+
+configure_colors
+export RALPH_COLOR="$color_mode"
 
 if ((interactive)); then
   configure_interactive

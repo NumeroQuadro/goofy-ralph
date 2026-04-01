@@ -61,12 +61,63 @@ extra_args=()
 loop_id="$(date -u +%Y%m%dT%H%M%SZ)-pid$$"
 prompt_source="unspecified"
 
+to_lower() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+color_mode="${RALPH_COLOR:-auto}"
+use_color=0
+C_RESET=""
+C_DIM=""
+C_RED=""
+
+configure_colors() {
+  local normalized=""
+
+  if [[ -n "${NO_COLOR+x}" ]]; then
+    use_color=0
+    return
+  fi
+
+  normalized="$(to_lower "$color_mode")"
+  case "$normalized" in
+    auto|"")
+      if [[ -t 1 && "${TERM:-}" != "dumb" ]]; then
+        use_color=1
+      else
+        use_color=0
+      fi
+      ;;
+    always|force|yes|true|1)
+      use_color=1
+      ;;
+    never|no|false|0)
+      use_color=0
+      ;;
+    *)
+      use_color=0
+      ;;
+  esac
+
+  if ((use_color)); then
+    C_RESET=$'\033[0m'
+    C_DIM=$'\033[2m'
+    C_RED=$'\033[31m'
+  else
+    C_RESET=""
+    C_DIM=""
+    C_RED=""
+  fi
+}
+
+configure_colors
+
 log_stdout() {
-  printf 'loop_id=%s %s\n' "$loop_id" "$*"
+  printf '%sloop_id=%s%s %s\n' "$C_DIM" "$loop_id" "$C_RESET" "$*"
 }
 
 log_stderr() {
-  printf 'loop_id=%s %s\n' "$loop_id" "$*" >&2
+  printf '%sloop_id=%s %s%s\n' "$C_RED" "$loop_id" "$*" "$C_RESET" >&2
 }
 
 describe_cmd() {
