@@ -58,9 +58,9 @@ Notes:
   - If no prompt is supplied, non-interactive runs use `RALPH.md` from the
     effective working directory when that file exists.
   - Running `__CMD__` with no prompt in an interactive terminal opens a
-    small setup menu for mode, model, prompt source, run count, and a few
-    execution toggles, while inferring the target directory from where you
-    launched the command.
+    small setup menu for backend, mode, model, prompt source, run count,
+    and a few execution toggles, while inferring the target directory from
+    where you launched the command.
   - On real TTYs, compact selectors use ←/→ (or h/l) and Enter.
   - The TTY model picker stays intentionally small: use plain Codex
     defaults, or enter a custom model override manually.
@@ -406,6 +406,9 @@ choose_with_arrows() {
       $'\n')
         break
         ;;
+      $'\r')
+        break
+        ;;
       h|H)
         index=$(( (index - 1 + count) % count ))
         ;;
@@ -490,6 +493,58 @@ EOF
         ;;
       6|danger|danger-full-access)
         mode="danger"
+        return
+        ;;
+    esac
+    echo "unsupported choice: ${selection}" >&2
+  done
+}
+
+choose_backend_interactive() {
+  local selection=""
+  local default_selection="1"
+  local codex_description="codex exec prompt loop"
+  local opencode_description="opencode run prompt loop"
+  local backend_values=("codex" "opencode")
+  local backend_labels=("codex" "opencode")
+  local backend_descriptions=()
+
+  if ! command_exists codex; then
+    codex_description="codex exec (not found on PATH)"
+  fi
+
+  if ! command_exists opencode; then
+    opencode_description="opencode run (not found on PATH)"
+  fi
+
+  backend_descriptions=("$codex_description" "$opencode_description")
+
+  case "$backend" in
+    opencode) default_selection="2" ;;
+  esac
+
+  if [[ -t 0 && -t 1 ]]; then
+    choose_with_arrows "Backend" backend "$backend" backend_values backend_labels backend_descriptions
+    return
+  fi
+
+  cat <<EOF
+
+Backend:
+  1) codex    ${codex_description}
+  2) opencode ${opencode_description}
+EOF
+
+  while true; do
+    read -r -p "Choose backend [${default_selection}]: " selection
+    selection="${selection:-$default_selection}"
+    case "$(to_lower "$selection")" in
+      1|codex)
+        backend="codex"
+        return
+        ;;
+      2|opencode)
+        backend="opencode"
         return
         ;;
     esac
@@ -607,7 +662,7 @@ choose_delay_interactive() {
     "1 second"
     "2 seconds"
     "5 seconds"
-    "type any non-negative number"
+    "press Enter to type a number"
   )
 
   if ! array_contains delay_values "$selection"; then
@@ -643,17 +698,23 @@ choose_delay_interactive() {
 
 choose_prompt_interactive() {
   local base_dir="$1"
-  local source_choice=""
-  local default_source="1"
+  local selection=""
+  local default_selection="1"
   local prompt_file_default=""
   local prompt_text_default=""
   local candidate_path=""
-  local prompt_source_values=("file" "text")
-  local prompt_source_labels=("file" "text")
-  local prompt_source_descriptions=("use a prompt file from the current directory" "type a single-line prompt")
+  local prompt_values=()
+  local prompt_labels=()
+  local prompt_descriptions=()
+  local prompt_files_added=0
+  local max_prompt_files=25
+  local file_candidate=""
+  local file_label=""
+  local file_value=""
+  local custom_choice="__CUSTOM_FILE_PATH__"
+  local text_choice="__PROMPT_TEXT__"
 
   if [[ "$prompt_kind" == "text" ]]; then
-    default_source="2"
     prompt_text_default="$prompt_value"
   else
     if [[ -n "$prompt_value" ]]; then
@@ -663,57 +724,127 @@ choose_prompt_interactive() {
     fi
   fi
 
-  echo
   if [[ -t 0 && -t 1 ]]; then
-    choose_with_arrows "Prompt source" source_choice "${prompt_source_values[$((default_source - 1))]}" prompt_source_values prompt_source_labels prompt_source_descriptions
-  else
-    echo "Prompt source:"
-    echo "  1) file"
-    echo "  2) text"
-  fi
-
-  while true; do
-    if [[ -t 0 && -t 1 ]]; then
-      :
-    else
-      read -r -p "Choose prompt source [${default_source}]: " source_choice
-      source_choice="${source_choice:-$default_source}"
+    if [[ -f "${base_dir}/${default_prompt_filename}" ]]; then
+      file_label="$default_prompt_filename"
+      if [[ "$base_dir" == "$launch_dir" ]]; then
+        file_value="$default_prompt_filename"
+      else
+        file_value="${base_dir}/${default_prompt_filename}"
+      fi
+      prompt_values+=("$file_value")
+      prompt_labels+=("$file_label")
+      prompt_descriptions+=("")
+      prompt_files_added=$((prompt_files_added + 1))
     fi
-    case "$(to_lower "$source_choice")" in
-      1|file)
-        while true; do
-          prompt_with_default "Prompt file path" "$prompt_file_default" prompt_file_default
-          candidate_path="$prompt_file_default"
-          if [[ -z "$candidate_path" ]]; then
-            echo "prompt file path is required" >&2
-          elif prompt_file_default="$(resolve_existing_file_path "$candidate_path" "$base_dir")"; then
-            prompt_kind="file"
-            prompt_value="$prompt_file_default"
-            return
-          else
-            echo "prompt file not found: $candidate_path" >&2
-          fi
-        done
+
+    for file_candidate in "${base_dir}"/*; do
+      ((prompt_files_added < max_prompt_files)) || break
+      [[ -f "$file_candidate" ]] || continue
+
+      file_label="$(basename "$file_candidate")"
+      [[ "$file_label" == "$default_prompt_filename" ]] && continue
+
+      if [[ "$base_dir" == "$launch_dir" ]]; then
+        file_value="$file_label"
+      else
+        file_value="$file_candidate"
+      fi
+
+      prompt_values+=("$file_value")
+      prompt_labels+=("$file_label")
+      prompt_descriptions+=("")
+      prompt_files_added=$((prompt_files_added + 1))
+    done
+
+    prompt_values+=("$custom_choice" "$text_choice")
+    prompt_labels+=("custom file path" "text")
+    prompt_descriptions+=("enter a path to a prompt file" "type a single-line prompt")
+
+    if [[ "$prompt_kind" == "text" ]]; then
+      selection="$text_choice"
+    elif [[ -n "$prompt_file_default" ]]; then
+      selection="$prompt_file_default"
+    else
+      selection="$custom_choice"
+    fi
+
+    echo
+    choose_with_arrows "Prompt" selection "$selection" prompt_values prompt_labels prompt_descriptions
+  else
+    if [[ -f "${base_dir}/${default_prompt_filename}" ]]; then
+      default_selection="1"
+    else
+      default_selection="2"
+    fi
+    if [[ "$prompt_kind" == "text" ]]; then
+      default_selection="3"
+    fi
+
+    echo
+    echo "Prompt:"
+    echo "  1) default file (${default_prompt_filename})"
+    echo "  2) file path"
+    echo "  3) text"
+
+    read -r -p "Choose prompt [${default_selection}]: " selection
+    selection="${selection:-$default_selection}"
+    case "$(to_lower "$selection")" in
+      1|default)
+        if [[ -n "$prompt_file_default" ]]; then
+          prompt_kind="file"
+          prompt_value="$prompt_file_default"
+          return
+        fi
+        selection="$custom_choice"
         ;;
-      2|text)
-        while true; do
-          prompt_with_default "Prompt text (single line)" "$prompt_text_default" prompt_text_default
-          if [[ -z "$prompt_text_default" ]]; then
-            echo "prompt text is required" >&2
-          else
-            prompt_kind="text"
-            prompt_value="$prompt_text_default"
-            return
-          fi
-        done
+      2|file)
+        selection="$custom_choice"
+        ;;
+      3|text)
+        selection="$text_choice"
+        ;;
+      *)
+        echo "unsupported choice: ${selection}" >&2
+        return 1
         ;;
     esac
-    if [[ -t 0 && -t 1 ]]; then
-      echo "unsupported choice: ${source_choice}" >&2
-      return 1
-    fi
-    echo "unsupported choice: ${source_choice}" >&2
-  done
+  fi
+
+  case "$selection" in
+    "$custom_choice")
+      while true; do
+        prompt_with_default "Prompt file path" "$prompt_file_default" prompt_file_default
+        candidate_path="$prompt_file_default"
+        if [[ -z "$candidate_path" ]]; then
+          echo "prompt file path is required" >&2
+        elif prompt_file_default="$(resolve_existing_file_path "$candidate_path" "$base_dir")"; then
+          prompt_kind="file"
+          prompt_value="$prompt_file_default"
+          return
+        else
+          echo "prompt file not found: $candidate_path" >&2
+        fi
+      done
+      ;;
+    "$text_choice")
+      while true; do
+        prompt_with_default "Prompt text (single line)" "$prompt_text_default" prompt_text_default
+        if [[ -z "$prompt_text_default" ]]; then
+          echo "prompt text is required" >&2
+        else
+          prompt_kind="text"
+          prompt_value="$prompt_text_default"
+          return
+        fi
+      done
+      ;;
+    *)
+      prompt_kind="file"
+      prompt_value="$selection"
+      return
+      ;;
+  esac
 }
 
 configure_interactive() {
@@ -727,6 +858,7 @@ configure_interactive() {
   local continue_value="no"
   local dry_run_value="no"
   local should_launch="yes"
+  local rule="---------------------------------------------------------------------"
 
   if ((continue_on_error)); then
     continue_value="yes"
@@ -736,7 +868,15 @@ configure_interactive() {
   fi
 
   echo "${command_name} interactive setup"
-  echo "launch_dir=${launch_dir}"
+  echo "$rule"
+  echo "Context:"
+  echo "  launch_dir=${launch_dir}"
+  echo "  workdir=${workdir_value}"
+  echo "  out_dir=${out_dir_value}"
+  echo "$rule"
+  echo
+
+  choose_backend_interactive
 
   if [[ "$backend" == "codex" ]]; then
     choose_mode_interactive
@@ -759,10 +899,12 @@ configure_interactive() {
   fi
 
   choose_prompt_interactive "$workdir_value"
+
   ask_yes_no "Continue on error" "$continue_value" continue_value
   ask_yes_no "Dry run" "$dry_run_value" dry_run_value
 
   echo
+  echo "$rule"
   echo "Summary:"
   echo "  backend=${backend}"
   echo "  mode=${mode}"
@@ -779,6 +921,8 @@ configure_interactive() {
   echo "  out_dir=${out_dir_value}"
   echo "  continue_on_error=${continue_value}"
   echo "  dry_run=${dry_run_value}"
+  echo "$rule"
+  echo
 
   ask_yes_no "Launch now" "$should_launch" should_launch
   if [[ "$should_launch" != "yes" ]]; then

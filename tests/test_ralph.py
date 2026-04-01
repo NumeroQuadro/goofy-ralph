@@ -382,12 +382,13 @@ class RalphCliTests(unittest.TestCase):
                 "--interactive",
                 input_text="\n".join(
                     [
+                        "",
                         "2",
                         "",
                         "",
                         "2",
                         "0",
-                        "1",
+                        "2",
                         str(prompt_path),
                         "n",
                         "y",
@@ -414,10 +415,11 @@ class RalphCliTests(unittest.TestCase):
             input_text="\n".join(
                 [
                     "",
+                    "",
                     "build",
                     "2",
                     "0",
-                    "2",
+                    "3",
                     "review this repo",
                     "n",
                     "y",
@@ -457,12 +459,12 @@ class RalphCliTests(unittest.TestCase):
                 cwd=tmp_path,
                 env=env,
                 interactions=[
+                    (b"Backend: < opencode >", b"\n"),
                     (b"Model: < backend default >", b"\n"),
                     (b"Agent override (blank keeps current opencode agent):", b"\n"),
                     (b"How many runs [15]:", b"1\n"),
-                    (b"Delay: < 0 >", b"\n"),
-                    (b"Prompt source: < file >", b"\n"),
-                    (b"Prompt file path [RALPH.md]:", b"\n"),
+                    (b"Delay: < 0 >", b"\r"),
+                    (b"Prompt: < RALPH.md >", b"\n"),
                     (b"Continue on error: < no >", b"\n"),
                     (b"Dry run: < no >", b"\n"),
                     (b"Launch now: < yes >", b"\n"),
@@ -487,13 +489,13 @@ class RalphCliTests(unittest.TestCase):
                 cwd=tmp_path,
                 input_text="\n".join(
                     [
+                        "",
                         "1",
                         "",
                         "",
                         "1",
                         "0",
                         "1",
-                        "",
                         "n",
                         "y",
                         "",
@@ -512,12 +514,13 @@ class RalphCliTests(unittest.TestCase):
             "--interactive",
             input_text="\n".join(
                 [
+                    "",
                     "3",
                     "gpt-5.5-codex",
                     "",
                     "1",
                     "0",
-                    "2",
+                    "3",
                     "review account docs",
                     "n",
                     "y",
@@ -549,12 +552,13 @@ class RalphCliTests(unittest.TestCase):
                 cwd=tmp_path,
                 input_text="\n".join(
                     [
+                        "",
                         "1",
                         "",
                         "",
                         "1",
                         "0",
-                        "1",
+                        "2",
                         "prompt.txt",
                         "n",
                         "y",

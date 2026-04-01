@@ -77,6 +77,8 @@ Interactive mode:
 ralph
 ```
 
+The interactive setup lets you pick the backend (`codex` or `opencode`) and then tweak the usual defaults (mode, model, prompt source, run count, etc.).
+
 Defaults:
 
 - prompt file: `RALPH.md` from the effective working directory, when present
