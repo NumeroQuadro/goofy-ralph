@@ -185,6 +185,8 @@ C_CYAN=""
 C_GREEN=""
 C_YELLOW=""
 C_RED=""
+C_ORANGE=""
+C_GRAY=""
 
 require_value() {
   local flag="$1"
@@ -221,6 +223,30 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
+supports_truecolor() {
+  case "${COLORTERM:-}" in
+    *truecolor*|*24bit*)
+      return 0
+      ;;
+  esac
+
+  case "${TERM:-}" in
+    *-direct*)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+ansi_fg_rgb() {
+  printf '\033[38;2;%s;%s;%sm' "$1" "$2" "$3"
+}
+
+ansi_fg_256() {
+  printf '\033[38;5;%sm' "$1"
+}
+
 configure_colors() {
   local normalized=""
 
@@ -254,10 +280,23 @@ configure_colors() {
     C_RESET=$'\033[0m'
     C_BOLD=$'\033[1m'
     C_DIM=$'\033[2m'
-    C_CYAN=$'\033[36m'
-    C_GREEN=$'\033[32m'
-    C_YELLOW=$'\033[33m'
-    C_RED=$'\033[31m'
+    if supports_truecolor; then
+      # Gruvbox-ish palette (truecolor).
+      C_ORANGE="$(ansi_fg_rgb 254 128 25)"  # #fe8019
+      C_CYAN="$(ansi_fg_rgb 131 165 152)"   # #83a598 (blue)
+      C_GREEN="$(ansi_fg_rgb 184 187 38)"   # #b8bb26
+      C_YELLOW="$(ansi_fg_rgb 250 189 47)"  # #fabd2f
+      C_RED="$(ansi_fg_rgb 251 73 52)"      # #fb4934
+      C_GRAY="$(ansi_fg_rgb 146 131 116)"   # #928374
+    else
+      # Gruvbox-ish palette (256-color fallback).
+      C_ORANGE="$(ansi_fg_256 208)"
+      C_CYAN="$(ansi_fg_256 109)"
+      C_GREEN="$(ansi_fg_256 142)"
+      C_YELLOW="$(ansi_fg_256 214)"
+      C_RED="$(ansi_fg_256 167)"
+      C_GRAY="$(ansi_fg_256 243)"
+    fi
   else
     C_RESET=""
     C_BOLD=""
@@ -266,6 +305,8 @@ configure_colors() {
     C_GREEN=""
     C_YELLOW=""
     C_RED=""
+    C_ORANGE=""
+    C_GRAY=""
   fi
 }
 
@@ -471,11 +512,11 @@ choose_with_arrows() {
     current_label="$(array_get "$labels_name" "$index")"
     current_description="$(array_get "$descriptions_name" "$index")"
 
-    printf '\r\033[2K%s%s: < %s >' "$C_CYAN" "$title" "$current_label"
+    printf '\r\033[2K%s%s: < %s >%s' "$C_CYAN" "$title" "$current_label" "$C_RESET"
     if [[ -n "$current_description" ]]; then
-      printf '  %s' "$current_description"
+      printf '  %s%s%s' "$C_GRAY" "$current_description" "$C_RESET"
     fi
-    printf '  [←/→, Enter]%s' "$C_RESET"
+    printf '  %s[←/→, Enter]%s' "$C_GRAY" "$C_RESET"
 
     IFS= read -rsn1 key || true
     case "$key" in
@@ -946,13 +987,13 @@ configure_interactive() {
     dry_run_value="yes"
   fi
 
-  echo "${C_BOLD}${command_name} interactive setup${C_RESET}"
-  echo "${C_DIM}${rule}${C_RESET}"
-  echo "${C_BOLD}Context:${C_RESET}"
+  echo "${C_BOLD}${C_ORANGE}${command_name} interactive setup${C_RESET}"
+  echo "${C_GRAY}${rule}${C_RESET}"
+  echo "${C_BOLD}${C_YELLOW}Context:${C_RESET}"
   echo "  launch_dir=${launch_dir}"
   echo "  workdir=${workdir_value}"
   echo "  out_dir=${out_dir_value}"
-  echo "${C_DIM}${rule}${C_RESET}"
+  echo "${C_GRAY}${rule}${C_RESET}"
   echo
 
   choose_backend_interactive
@@ -983,8 +1024,8 @@ configure_interactive() {
   ask_yes_no "Dry run" "$dry_run_value" dry_run_value
 
   echo
-  echo "${C_DIM}${rule}${C_RESET}"
-  echo "${C_BOLD}Summary:${C_RESET}"
+  echo "${C_GRAY}${rule}${C_RESET}"
+  echo "${C_BOLD}${C_YELLOW}Summary:${C_RESET}"
   echo "  backend=${backend}"
   echo "  mode=${mode}"
   echo "  model=${model_value:-<current ${backend} default>}"
@@ -1000,7 +1041,7 @@ configure_interactive() {
   echo "  out_dir=${out_dir_value}"
   echo "  continue_on_error=${continue_value}"
   echo "  dry_run=${dry_run_value}"
-  echo "${C_DIM}${rule}${C_RESET}"
+  echo "${C_GRAY}${rule}${C_RESET}"
   echo
 
   ask_launch_now "$should_launch" should_launch

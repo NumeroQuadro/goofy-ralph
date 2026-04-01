@@ -71,6 +71,30 @@ C_RESET=""
 C_DIM=""
 C_RED=""
 
+supports_truecolor() {
+  case "${COLORTERM:-}" in
+    *truecolor*|*24bit*)
+      return 0
+      ;;
+  esac
+
+  case "${TERM:-}" in
+    *-direct*)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+ansi_fg_rgb() {
+  printf '\033[38;2;%s;%s;%sm' "$1" "$2" "$3"
+}
+
+ansi_fg_256() {
+  printf '\033[38;5;%sm' "$1"
+}
+
 configure_colors() {
   local normalized=""
 
@@ -101,8 +125,15 @@ configure_colors() {
 
   if ((use_color)); then
     C_RESET=$'\033[0m'
-    C_DIM=$'\033[2m'
-    C_RED=$'\033[31m'
+    if supports_truecolor; then
+      # Gruvbox-ish palette (truecolor).
+      C_DIM="$(ansi_fg_rgb 146 131 116)" # #928374
+      C_RED="$(ansi_fg_rgb 251 73 52)"   # #fb4934
+    else
+      # Gruvbox-ish palette (256-color fallback).
+      C_DIM="$(ansi_fg_256 243)"
+      C_RED="$(ansi_fg_256 167)"
+    fi
   else
     C_RESET=""
     C_DIM=""
